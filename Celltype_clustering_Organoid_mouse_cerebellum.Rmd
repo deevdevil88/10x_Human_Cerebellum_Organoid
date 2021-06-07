@@ -1,0 +1,163 @@
+---
+title: "Sams_paper_clustering_2"
+author: "Devika Agarwal"
+date: 'Last update: `r date()`'
+output:
+  html_document:
+    theme: cerulean
+    number_sections: true
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: yes
+      toc_depth: 6
+---
+<style type="text/css">
+
+body{ /* Normal  */
+      font-size: 12px;
+  }
+td {  /* Table  */
+  font-size: 10px;
+}
+h1.title {
+  font-size: 18px;
+  color: DarkRed;
+}
+h1 { /* Header 1 */
+  font-size: 16px;
+  color: DarkBlue;
+}
+h2 { /* Header 2 */
+    font-size: 16px;
+  color: DarkBlue;
+}
+h3 { /* Header 3 */
+  font-size: 14px;
+  font-family: "Times New Roman", Times, serif;
+  color: DarkBlue;
+}
+code.r{ /* Code block */
+    font-size: 12px;
+}
+pre { /* Code block - determines code spacing between lines */
+    font-size: 14px;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+
+
+```{r pacakges}
+library(Seurat)
+library(plyr)
+library(tidyverse)
+library(ggplot2)
+library(psych)
+library(tidyr)
+library(randomcoloR)
+```
+
+# Load in data
+
+```{r load_data}
+Human_mouse <- readRDS(file = "./20200924CarterRNAslotSCTmouseganoidsFIG.rds")
+
+Human_mouse$celltype_int <-  paste(Human_mouse$old.ident,Human_mouse$cell_type,sep="")
+
+Human_mouse$celltype_int <- gsub("NA","", Human_mouse$celltype_int)
+#Human_mouse$sample_date <- as.factor(Human_mouse$sample_date)
+Human_mouse$sample_date <- Human_mouse$sample_date %>% replace_na("D90")
+Human_mouse$celltype_time <- paste(Human_mouse$sample_date,"_",Human_mouse$celltype_int,sep="")
+Human_mouse$celltype_int <- paste(Human_mouse$celltype_int,"_",Human_mouse$dataset,sep="")
+Idents(Human_mouse) <- "celltype_int"
+
+metadata <- Human_mouse@meta.data
+Avg_human_mouse <-  AverageExpression(Human_mouse, return.seurat = T,)
+
+Avg_log_int <- GetAssayData(Avg_human_mouse, slot = "data", assay = "integrated")
+
+Avg_scaled_int <- GetAssayData(Avg_human_mouse, slot = "scale.data", assay = "integrated")
+```
+
+
+# heatmap/Clustering of integrated cell type data (Oragnoid_Carter data)
+
+```{r, fig.height=7, fig.width=8}
+library(pheatmap)
+pearson_corr <- cor(Avg_scaled_int, method = "pearson")
+celltype_scale <- pheatmap::pheatmap(mat= pearson_corr, clustering_method = "ward.D2", fontsize = 5)
+```
+
+## ComBat Correction of Average logged data (non parametric combat corrected)
+
+```{r}
+metadata <- Avg_human_mouse@meta.data 
+metadata$study <- c( rep("Nayler", times=12), rep("Carter",times=15))
+metadata$study <- as.factor(metadata$study)
+library(sva)
+combat_avg_log_Carter <- ComBat(dat = as.matrix(Avg_log_int), batch = metadata$study, par.prior = F)
+```
+
+```{r, fig.height=7, fig.width=8}
+pearson_corr <- cor(combat_avg_log_Carter, method = "pearson")
+ann_col <- data.frame(rownames(metadata),metadata$study)
+colnames(ann_col)[2] <- "Study"
+colnames(ann_col)[1] <- "row"
+ann_col<- column_to_rownames(ann_col, var = "row")
+celltype_combat_KA_1 <- pheatmap::pheatmap(mat= pearson_corr, clustering_method = "ward.D2", annotation_col = ann_col, fontsize = 6)
+```
+
+
+## ComBat Correction of Average logged data (parametric combat corrected)
+
+```{r}
+metadata <- Avg_human_mouse@meta.data 
+metadata$study <- c( rep("Nayler", times=12), rep("Carter",times=15))
+metadata$study <- as.factor(metadata$study)
+library(sva)
+combat_avg_log_Carter <- ComBat(dat = as.matrix(Avg_log_int), batch = metadata$study, par.prior = T)
+```
+
+```{r, fig.height=7, fig.width=8}
+pearson_corr <- cor(combat_avg_log_Carter, method = "pearson")
+ann_col <- data.frame(rownames(metadata),metadata$study)
+colnames(ann_col)[2] <- "Study"
+colnames(ann_col)[1] <- "row"
+ann_col<- column_to_rownames(ann_col, var = "row")
+celltype_combat_KA_1 <- pheatmap::pheatmap(mat= pearson_corr, clustering_method = "ward.D2", annotation_col = ann_col, fontsize = 6)
+```
+
+
+
+
+
+
+
+
+
+# Developmental time + cell type clustering of Organoid : Carter data
+
+```{r}
+Idents(object = Human_mouse) <- "celltype_time"
+Avg_human_mouse <-  AverageExpression(Human_mouse, return.seurat = T,)
+
+Avg_log_int <- GetAssayData(Avg_human_mouse, slot = "data", assay = "integrated")
+
+Avg_scaled_int <- GetAssayData(Avg_human_mouse, slot = "scale.data", assay = "integrated")
+```
+
+```{r,fig.height=13, fig.width=13}
+pearson_corr <- cor(Avg_scaled_int, method = "pearson")
+celltype_devtime <- pheatmap::pheatmap(mat= pearson_corr, clustering_method = "ward.D2", fontsize = 6, treeheight_col = 30, treeheight_row = 30)
+```
+
+
+
+```{r}
+sessionInfo()
+```
+

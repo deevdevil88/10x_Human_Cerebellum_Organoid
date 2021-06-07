@@ -1,0 +1,210 @@
+---
+title: "Cerebllar_organoid_brainspan_voxhunt"
+date: 'Last update: `r date()`'
+output:
+  html_document:
+    theme: cerulean
+    number_sections: true
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: yes
+      toc_depth: 8
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE,message=FALSE,warning=FALSE, cache=TRUE)
+library(voxhunt)
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+```
+
+
+```{r }
+data('brainspan')
+names(brainspan)
+```
+```{r functions}
+de <- function(expr_mat, groups){
+    de_df <- presto::wilcoxauc(t(expr_mat), groups)
+    de_df <- dplyr::select(de_df, 'gene'=feature, group, 'avg_exp'=avgExpr, 'fc'=logFC, auc,
+                    pval, padj, 'prcex_self'=pct_in, 'prcex_other'=pct_out)
+    return(tibble::as_tibble(de_df))
+}
+
+```
+
+# Load Organoid data
+```{r }
+
+organoid <- readRDS(file="./20200918vs2_v3update_newganoidscombinednames.rds")
+organoid[["celltype"]] <- Idents(object = organoid)
+DefaultAssay(organoid) <- "SCT"
+
+
+organoid_high_var <- organoid@assays$integrated@var.features
+brainspan_regiongroup_a10pcw <- data.frame(brainspan$col_meta$log2fc_regiongroup_a10pcw, brainspan$col_meta$gene, brainspan$col_meta$p_regiongroup_a10pcw)
+colnames(brainspan_regiongroup_a10pcw)[1] <- "log2fc_rgroup_a10pcw"
+colnames(brainspan_regiongroup_a10pcw)[2] <- "gene"
+colnames(brainspan_regiongroup_a10pcw)[3] <- "p_regiongroup_a10pcw"
+brainspan_top_regiongroup_a10pcw <- brainspan_regiongroup_a10pcw %>% filter(p_regiongroup_a10pcw < 0.05) %>% top_n(500, log2fc_rgroup_a10pcw)
+genes_use <- as.character(brainspan_top_regiongroup_a10pcw$gene)
+
+brainspan_hvg_a10pcw <- data.frame(brainspan$col_meta$p_highvar, brainspan$col_meta$gene)
+colnames(brainspan_hvg_a10pcw)[1] <- "p.highvar"
+colnames(brainspan_hvg_a10pcw)[2] <- "gene"
+brainspan_top_hvg <- brainspan_hvg_a10pcw %>% top_n(1000,-p.highvar)
+brainspan_hvg <- as.character(brainspan_top_hvg$gene)
+
+
+brainspan_region_a10pcw <- data.frame(brainspan$col_meta$log2fc_region_a10pcw, brainspan$col_meta$gene, brainspan$col_meta$p_region_a10pcw)
+colnames(brainspan_region_a10pcw)[1] <- "log2fc_region_a10pcw"
+colnames(brainspan_region_a10pcw)[2] <- "gene"
+colnames(brainspan_region_a10pcw)[3] <- "p_region_a10pcw"
+brainspan_top_region_a10pcw <- brainspan_region_a10pcw %>% filter(p_region_a10pcw < 0.05) %>% top_n(500, log2fc_region_a10pcw)
+genes_use_2 <- as.character(brainspan_top_region_a10pcw$gene)
+
+brainspan$row_meta$custom <- paste(brainspan$row_meta$structure_acronym,brainspan$row_meta$age, sep="_")
+```
+
+# Map Pseudobulk organoid to Brain span data
+
++ use SCT assay log normalised d
+
++ Using these features, we can now construct a similarity map to stages pcw 10 - pcw 24. We also use the argument pseudobulk_groups to summarize the single cell data before calculating the correlation. This makes everything much faster and usually yields very similary results as mapping each cell individually.
+
++ genes used : top 500  brain span genes based on p < 0.05 and highest logfc for region group after 10 pcw
+
+```{r}
+ref_map <- brainspan_map(
+    organoid,
+    stages = 12:25,
+    group_name = 'celltype',
+    genes_use = genes_use,
+    pseudobulk_groups = T
+)
+print(ref_map)
+```
+
+```{r, fig.width=9}
+plot_map(ref_map)
+```
+```{r}
+plot_structure_similarity(ref_map, annotation_level = 'structure_name', scale = F)
+```
+
+
+ Using these features, we can now construct a similarity map to stages pcw 10 - pcw 24. We also use the argument pseudobulk_groups to summarize the single cell data before calculating the correlation. This makes everything much faster and usually yields very similary results as mapping each cell individually.
+
++ genes used : HVG for organoids from integrated slot 2000 genes
+
+```{r}
+ref_map_2 <- brainspan_map(
+    organoid,
+    stages = 12:25,
+    group_name = 'celltype',
+    genes_use = organoid_high_var,
+    pseudobulk_groups = T
+)
+print(ref_map_2)
+```
+
+```{r}
+plot_map(ref_map_2)
+```
+
+```{r}
+plot_structure_similarity(ref_map_2, annotation_level = 'structure_name', scale = F)
+```
+
++ genes used : top 1000 HVG brain span genes based on pvalues from braispan opbject
+When i used the top 1000 HVG genes the correlation map was super noisy. As per their reccomendation 150-500 genes give cleaner results (see first results)
+
+
+```{r}
+ref_map_3 <- brainspan_map(
+    organoid,
+    stages = 12:25,
+    group_name = 'celltype',
+    genes_use = brainspan_hvg,
+    pseudobulk_groups = T
+)
+print(ref_map_3)
+```
+
+```{r, fig.width=8}
+plot_map(ref_map_3)
+```
+
+
+```{r}
+plot_structure_similarity(ref_map_3, annotation_level = 'structure_name', scale = F)
+```
+
+
++ genes used : Intersection of Brainspan top 1000 HVG and Organoid 2000 integrated slot HVG genes
+
+
+```{r}
+intersected_hvg <- intersect(brainspan_hvg, organoid_high_var)
+ref_map_4 <- brainspan_map(
+    organoid,
+    stages = 12:25,
+    group_name = 'celltype',
+    genes_use = intersected_hvg,
+    pseudobulk_groups = T
+)
+print(ref_map_4)
+```
+
+```{r, fig.width=8}
+plot_map(ref_map_4)
+```
+
+
+```{r}
+plot_structure_similarity(ref_map_4, annotation_level = 'structure_name', scale = F)
+```
+
+
++ genes used : Brain span region after 10 PCW top 500 genes as opposed to region grouped based on pvalue < 0.05 and highest logFC
+
+```{r, fig.width= 9}
+intersected_hvg <- intersect(brainspan_hvg, organoid_high_var)
+ref_map_5 <- brainspan_map(
+    organoid,
+    stages = 12:25,
+    group_name = 'celltype',
+    genes_use = genes_use_2,
+    pseudobulk_groups = T
+)
+print(ref_map_5)
+```
+
+```{r, fig.width=8}
+plot_map(ref_map_5)
+```
+
+
+```{r}
+plot_structure_similarity(ref_map_5, annotation_level = 'structure_name', scale = F)
+```
+
+
+
+
+In conclusion, we get the cleanest signal when I only use top 500 Brainspan region specific DEGs after pcw 10 based on FC. If use top 1000 the correlation becomes noisy.
+
+
+
+
+
+
+
+```{r}
+sessionInfo()
+```
+
+
+

@@ -1,0 +1,362 @@
+---
+title: "Sams_paper_clustering"
+author: "Devika Agarwal"
+date: 'Last update: `r date()`'
+output:
+  html_document:
+    theme: cerulean
+    number_sections: true
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: yes
+      toc_depth: 6
+---
+<style type="text/css">
+
+body{ /* Normal  */
+      font-size: 12px;
+  }
+td {  /* Table  */
+  font-size: 10px;
+}
+h1.title {
+  font-size: 18px;
+  color: DarkRed;
+}
+h1 { /* Header 1 */
+  font-size: 16px;
+  color: DarkBlue;
+}
+h2 { /* Header 2 */
+    font-size: 16px;
+  color: DarkBlue;
+}
+h3 { /* Header 3 */
+  font-size: 14px;
+  font-family: "Times New Roman", Times, serif;
+  color: DarkBlue;
+}
+code.r{ /* Code block */
+    font-size: 12px;
+}
+pre { /* Code block - determines code spacing between lines */
+    font-size: 14px;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+
+
+```{r pacakges}
+library(Seurat)
+library(plyr)
+library(tidyverse)
+library(ggplot2)
+library(psych)
+library(tidyr)
+library(randomcoloR)
+```
+
+
+
+# Clustering of Organoid + Human Cerebellar data
+
+```{r}
+Aldinger_organoid <- readRDS(file="./20200918KALoadganoidsSCTBest.rds")
+Idents(object = Aldinger_organoid) <- "old.ident"
+
+Aldinger_organoid$age <- Aldinger_organoid$age %>% replace_na("D90")
+Aldinger_organoid$age <- as.factor(Aldinger_organoid$age)
+Aldinger_organoid$celltype_age <- paste(Aldinger_organoid$age,"_",Aldinger_organoid$old.ident,sep="")
+
+Avg_Aldinger_organoid <-  AverageExpression(Aldinger_organoid, return.seurat = T,)
+
+Avg_log_int_KA_Nay <- GetAssayData(Avg_Aldinger_organoid ,slot = "data", assay = "integrated")
+
+Avg_scaled_int_KA_Nay <- GetAssayData(Avg_Aldinger_organoid, slot = "scale.data", assay = "integrated")
+
+Avg_raw_int_KA_Nay <- GetAssayData(Avg_Aldinger_organoid, slot = "counts", assay = "integrated")
+```
+
+# heatmap/Clustering of integrated cell type data (Oragnoid + KA human cerebellar data)
+
+## Average scaled integrated seurat data
+
+```{r, fig.height=7, fig.width=8}
+library(pheatmap)
+pearson_corr <- cor(Avg_scaled_int_KA_Nay, method = "pearson")
+celltype_scale_KA <- pheatmap::pheatmap(mat= pearson_corr, clustering_method = "ward.D2", fontsize = 5)
+```
+
+## ComBat Correction of Average logged data (non parametric combat corrected)
+
+```{r}
+metadata <- Avg_Aldinger_organoid@meta.data 
+metadata$study <- c( rep("KA", times=21), rep("Nayler",times=12))
+metadata$study <- as.factor(metadata$study)
+library(sva)
+combat_avg_log_KA <- ComBat(dat = as.matrix(Avg_log_int_KA_Nay), batch = metadata$study, par.prior = F)
+```
+
+
+
+```{r, fig.height=7, fig.width=8}
+pearson_corr <- cor(combat_avg_log_KA, method = "pearson")
+ann_col <- data.frame(rownames(metadata),metadata$study)
+colnames(ann_col)[2] <- "Study"
+colnames(ann_col)[1] <- "row"
+ann_col<- column_to_rownames(ann_col, var = "row")
+celltype_combat_KA_1 <- pheatmap::pheatmap(mat= pearson_corr, clustering_method = "ward.D2", annotation_col = ann_col, fontsize = 6)
+```
+
+
+## ComBat Correction of Average logged data (parametric combat corrected)
+
+```{r,fig.height=7, fig.width=8}
+combat_avg_log_KA <- ComBat(dat = as.matrix(Avg_log_int_KA_Nay), batch = metadata$study, par.prior = T )
+pearson_corr <- cor(combat_avg_log_KA, method = "pearson")
+ann_col <- data.frame(rownames(metadata),metadata$study)
+colnames(ann_col)[2] <- "Study"
+colnames(ann_col)[1] <- "row"
+ann_col<- column_to_rownames(ann_col, var = "row")
+celltype_combat_KA_2 <- pheatmap::pheatmap(mat= pearson_corr, clustering_method = "ward.D2", annotation_col = ann_col, fontsize = 5)
+```
+
+
+## PCA of Average integrated data (log or scaled)
+
+```{r, fig.height=7,fig.width=10}
+metadata$celltype <- rownames(metadata)
+pc_KA_avg <- prcomp(t(combat_avg_log_KA), scale. = F)
+
+metadata$pc1 <- pc_KA_avg$x[, 1]
+metadata$pc2 <-  pc_KA_avg$x[, 2]
+metadata$pc3 <- pc_KA_avg$x[, 3]
+metadata$pc4 <- pc_KA_avg$x[, 4]
+metadata$pc5 <- pc_KA_avg$x[, 5]
+metadata$pc6 <- pc_KA_avg$x[, 6]
+  pve_pc_KAavg <- summary(pc_KA_avg)$importance[2, ]
+  
+  #percent_var <- round( signif((pve[2]) * 100, 4), 2)
+#library(RColorBrewer)
+#colourCount = length(unique(metadata$celltype))
+#colourCount2= length(unique(plotdata$Batch))
+#getPalette = colorRampPalette(brewer.pal(11, "Set1"))
+  
+colour <- randomColor(count = 33)
+  
+library(ggrepel)
+
+
+p <- ggplot(data = metadata, aes(x=pc1, y=pc2, color= celltype, shape=study, label=celltype))
+p <- p + geom_point(alpha = 0.6, size=8)
+p <- p + scale_colour_manual(values = colour)
+p <- p + xlab(paste0("PC1 (", signif((pve_pc_KAavg[1]) * 100, 4), "%)"))
+p <- p + ylab(paste0("PC2 (",signif((pve_pc_KAavg[2]) * 100, 4), "%)"))
+p <- p + geom_text_repel(point.padding = NA, size=4)
+p <- p + geom_hline(yintercept=0, linetype="dashed", color = "gray")
+p <- p + geom_vline(xintercept=0, linetype="dashed", color = "gray")
+p <- p + guides(colour = guide_legend(override.aes = list(alpha=1))) + theme_bw()
+#p <- p + theme(legend.position = "none") 
+p
+
+
+p <- ggplot(data = metadata, aes(x=pc2, y=pc3, color= celltype, shape=study,label=celltype))
+p <- p + geom_point(alpha = 0.6, size=8)
+#p <- p + scale_colour_manual(values = getPalette(colourCount))
+p <- p + xlab(paste0("PC2 (", signif((pve_pc_KAavg[2]) * 100, 4), "%)"))
+p <- p + ylab(paste0("PC3 (",signif((pve_pc_KAavg[3]) * 100, 4), "%)"))
+p <- p + geom_text_repel(point.padding = NA, size=4)
+p <- p + geom_hline(yintercept=0, linetype="dashed", color = "gray")
+p <- p + geom_vline(xintercept=0, linetype="dashed", color = "gray")
+p <- p + guides(colour = guide_legend(override.aes = list(alpha=1))) + theme_bw()
+#p <- p + theme(legend.position = "none") 
+p
+
+p <- ggplot(data = metadata, aes(x=pc3, y=pc4, color= celltype, shape=study,label=celltype))
+p <- p + geom_point(alpha = 0.6, size=8)
+#p <- p + scale_colour_manual(values = getPalette(colourCount))
+p <- p + xlab(paste0("PC3 (", signif((pve_pc_KAavg[3]) * 100, 4), "%)"))
+p <- p + ylab(paste0("PC4 (",signif((pve_pc_KAavg[4]) * 100, 4), "%)"))
+p <- p + geom_text_repel(point.padding = NA, size=4)
+p <- p + geom_hline(yintercept=0, linetype="dashed", color = "gray")
+p <- p + geom_vline(xintercept=0, linetype="dashed", color = "gray")
+p <- p + guides(colour = guide_legend(override.aes = list(alpha=1))) + theme_bw()
+#p <- p + theme(legend.position = "none") 
+p
+
+
+```
+
+
+# Aldinger + Organoid (celltype + age)
+
+```{r}
+Idents(object = Aldinger_organoid) <- "celltype_age"
+Avg_Aldinger_organoid <-  AverageExpression(Aldinger_organoid, return.seurat = T,)
+
+Avg_log_int_KA_Nay <- GetAssayData(Avg_Aldinger_organoid ,slot = "data", assay = "integrated")
+
+Avg_scaled_int_KA_Nay <- GetAssayData(Avg_Aldinger_organoid, slot = "scale.data", assay = "integrated")
+```
+
+
+## Average scaled integrated seurat data
+
+```{r, fig.height=13, fig.width=13}
+library(pheatmap)
+pearson_corr <- cor(Avg_scaled_int_KA_Nay, method = "pearson")
+celltype_scale_KA <- pheatmap::pheatmap(mat= pearson_corr, clustering_method = "ward.D2", fontsize = 5,filename = "./Aldinger_Nayler_age_celltype_integrated_scaled.pdf",height = 16, width = 16,border_color = NA, fontsize_row = 5,fontsize_col = 5)
+celltype_scale_KA
+```
+
+## ComBat Correction of Average logged data (non parametric combat corrected)
+
+```{r}
+metadata <- Avg_Aldinger_organoid@meta.data 
+metadata$study <- c( rep("KA", times=196), rep("Nayler",times=12))
+metadata$study <- as.factor(metadata$study)
+library(sva)
+combat_avg_log_KA <- ComBat(dat = as.matrix(Avg_log_int_KA_Nay), batch = metadata$study, par.prior = F)
+```
+
+
+
+```{r, fig.height=13, fig.width=13}
+pearson_corr <- cor(combat_avg_log_KA, method = "pearson")
+ann_col <- data.frame(rownames(metadata),metadata$study)
+colnames(ann_col)[2] <- "Study"
+colnames(ann_col)[1] <- "row"
+ann_col<- column_to_rownames(ann_col, var = "row")
+celltype_combat_KA_1 <- pheatmap::pheatmap(mat= pearson_corr, clustering_method = "ward.D2", annotation_col = ann_col, fontsize = 5,filename = "./Aldinger_Nayler_age_celltype_combat_non_parametric.pdf",height = 16, width = 16,border_color = NA, fontsize_row = 5,fontsize_col = 5)
+```
+
+## ComBat Correction of Average logged data (parametric combat corrected)
+
+```{r,fig.height=13, fig.width=13}
+combat_avg_log_KA <- ComBat(dat = as.matrix(Avg_log_int_KA_Nay), batch = metadata$study, par.prior = T )
+pearson_corr <- cor(combat_avg_log_KA, method = "pearson")
+ann_col <- data.frame(rownames(metadata),metadata$study)
+colnames(ann_col)[2] <- "Study"
+colnames(ann_col)[1] <- "row"
+ann_col<- column_to_rownames(ann_col, var = "row")
+celltype_combat_KA_2 <- pheatmap::pheatmap(mat= pearson_corr, clustering_method = "ward.D2", annotation_col = ann_col, fontsize = 5,border_color = NA, fontsize_row = 5,fontsize_col = 5)
+```
+
+## PCA of Average integrated data (log or scaled)
+
+```{r, fig.height=7,fig.width=10}
+metadata$celltype <- rownames(metadata)
+pc_KA_avg <- prcomp(t(combat_avg_log_KA), scale. = F)
+
+metadata$pc1 <- pc_KA_avg$x[, 1]
+metadata$pc2 <-  pc_KA_avg$x[, 2]
+metadata$pc3 <- pc_KA_avg$x[, 3]
+metadata$pc4 <- pc_KA_avg$x[, 4]
+metadata$pc5 <- pc_KA_avg$x[, 5]
+metadata$pc6 <- pc_KA_avg$x[, 6]
+  pve_pc_KAavg <- summary(pc_KA_avg)$importance[2, ]
+  
+  #percent_var <- round( signif((pve[2]) * 100, 4), 2)
+#library(RColorBrewer)
+#colourCount = length(unique(metadata$celltype))
+#colourCount2= length(unique(plotdata$Batch))
+#getPalette = colorRampPalette(brewer.pal(11, "Set1"))
+  
+colour <- randomColor(count = 33)
+  
+library(ggrepel)
+
+
+p <- ggplot(data = metadata, aes(x=pc1, y=pc2, color= celltype, shape=study, label=celltype))
+p <- p + geom_point(alpha = 0.6, size=8)
+#p <- p + scale_colour_manual(values = colour)
+p <- p + xlab(paste0("PC1 (", signif((pve_pc_KAavg[1]) * 100, 4), "%)"))
+p <- p + ylab(paste0("PC2 (",signif((pve_pc_KAavg[2]) * 100, 4), "%)"))
+p <- p + geom_text_repel(point.padding = NA, size=4)
+p <- p + geom_hline(yintercept=0, linetype="dashed", color = "gray")
+p <- p + geom_vline(xintercept=0, linetype="dashed", color = "gray")
+p <- p + guides(colour = guide_legend(override.aes = list(alpha=1))) + theme_bw()
+p <- p + theme(legend.position = "none") 
+p
+
+
+p <- ggplot(data = metadata, aes(x=pc2, y=pc3, color= celltype, shape=study,label=celltype))
+p <- p + geom_point(alpha = 0.6, size=8)
+#p <- p + scale_colour_manual(values = getPalette(colourCount))
+p <- p + xlab(paste0("PC2 (", signif((pve_pc_KAavg[2]) * 100, 4), "%)"))
+p <- p + ylab(paste0("PC3 (",signif((pve_pc_KAavg[3]) * 100, 4), "%)"))
+p <- p + geom_text_repel(point.padding = NA, size=4)
+p <- p + geom_hline(yintercept=0, linetype="dashed", color = "gray")
+p <- p + geom_vline(xintercept=0, linetype="dashed", color = "gray")
+p <- p + guides(colour = guide_legend(override.aes = list(alpha=1))) + theme_bw()
+p <- p + theme(legend.position = "none") 
+p
+
+p <- ggplot(data = metadata, aes(x=pc3, y=pc4, color= celltype, shape=study,label=orig.ident))
+p <- p + geom_point(alpha = 0.6, size=8)
+#p <- p + scale_colour_manual(values = getPalette(colourCount))
+p <- p + xlab(paste0("PC3 (", signif((pve_pc_KAavg[3]) * 100, 4), "%)"))
+p <- p + ylab(paste0("PC4 (",signif((pve_pc_KAavg[4]) * 100, 4), "%)"))
+p <- p + geom_text_repel(point.padding = NA, size=4)
+p <- p + geom_hline(yintercept=0, linetype="dashed", color = "gray")
+p <- p + geom_vline(xintercept=0, linetype="dashed", color = "gray")
+p <- p + guides(colour = guide_legend(override.aes = list(alpha=1))) + theme_bw()
+p <- p + theme(legend.position = "none") 
+p
+
+write.table(metadata, "KA_Nayler_celltype_age_avg_metadata_pc_combat_corrected.txt", sep="\t", quote=F)
+
+```
+
+# Plot only PCs from KA and all of NAyler celltypes on PCA
+
+```{r}
+metadata_2 <- read.table(file="./KA_Nayler_PC_celltype_age_avg_metadata_pc_combat_corrected.txt", sep="\t", header=T, row.names = 1)
+p <- ggplot(data = metadata_2, aes(x=pc1, y=pc2, color= celltype, shape=study, label=celltype))
+p <- p + geom_point(alpha = 0.6, size=8)
+#p <- p + scale_colour_manual(values = colour)
+p <- p + xlab(paste0("PC1 (", signif((pve_pc_KAavg[1]) * 100, 4), "%)"))
+p <- p + ylab(paste0("PC2 (",signif((pve_pc_KAavg[2]) * 100, 4), "%)"))
+p <- p + geom_text_repel(point.padding = NA, size=4)
+p <- p + geom_hline(yintercept=0, linetype="dashed", color = "gray")
+p <- p + geom_vline(xintercept=0, linetype="dashed", color = "gray")
+p <- p + guides(colour = guide_legend(override.aes = list(alpha=1))) + theme_bw()
+p <- p + theme(legend.position = "none") 
+p
+
+
+p <- ggplot(data = metadata_2, aes(x=pc2, y=pc3, color= celltype, shape=study,label=celltype))
+p <- p + geom_point(alpha = 0.6, size=8)
+#p <- p + scale_colour_manual(values = getPalette(colourCount))
+p <- p + xlab(paste0("PC2 (", signif((pve_pc_KAavg[2]) * 100, 4), "%)"))
+p <- p + ylab(paste0("PC3 (",signif((pve_pc_KAavg[3]) * 100, 4), "%)"))
+p <- p + geom_text_repel(point.padding = NA, size=4)
+p <- p + geom_hline(yintercept=0, linetype="dashed", color = "gray")
+p <- p + geom_vline(xintercept=0, linetype="dashed", color = "gray")
+p <- p + guides(colour = guide_legend(override.aes = list(alpha=1))) + theme_bw()
+p <- p + theme(legend.position = "none") 
+p
+
+p <- ggplot(data = metadata_2, aes(x=pc3, y=pc4, color= celltype, shape=study,label=celltype))
+p <- p + geom_point(alpha = 0.6, size=8)
+#p <- p + scale_colour_manual(values = getPalette(colourCount))
+p <- p + xlab(paste0("PC3 (", signif((pve_pc_KAavg[3]) * 100, 4), "%)"))
+p <- p + ylab(paste0("PC4 (",signif((pve_pc_KAavg[4]) * 100, 4), "%)"))
+p <- p + geom_text_repel(point.padding = NA, size=4)
+p <- p + geom_hline(yintercept=0, linetype="dashed", color = "gray")
+p <- p + geom_vline(xintercept=0, linetype="dashed", color = "gray")
+p <- p + guides(colour = guide_legend(override.aes = list(alpha=1))) + theme_bw()
+p <- p + theme(legend.position = "none") 
+p
+```
+
+
+```{r}
+sessionInfo()
+```
+
